@@ -8,6 +8,7 @@ export default function LandingPage() {
   const session = getSession();
   const latestPosts = getPosts()
     .filter((post) => post && typeof post.title === 'string' && typeof post.createdAt === 'string')
+    .map((post) => ({ ...post, content: typeof post.content === 'string' ? post.content : '' }))
     .sort((first, second) => Date.parse(second.createdAt) - Date.parse(first.createdAt))
     .slice(0, 3);
 

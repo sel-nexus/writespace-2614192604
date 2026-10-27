@@ -1,18 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import Navbar from '../components/Navbar.jsx';
 import Avatar from '../components/Avatar.jsx';
 import { getSession, getPosts } from '../utils/storage.js';
 import { canManagePost, formatPostDate } from '../utils/posts.js';
-import { deletePost } from '../utils/posts.js';
+import { deletePost, subscribeToPostsUpdated } from '../utils/posts.js';
 
 /** Show a full post and restrict destructive or edit actions by ownership. */
 export default function ReadBlog() {
   const { id } = useParams();
   const navigate = useNavigate();
   const session = getSession();
-  const [posts, setPosts] = useState(() => getPosts());
-  const post = posts.find((entry) => entry.id === id);
+  const [, setPostsRevision] = useState(0);
+  useEffect(() => {
+    const refreshPosts = () => setPostsRevision((revision) => revision + 1);
+    return subscribeToPostsUpdated(refreshPosts);
+  }, []);
+  const post = getPosts().find((entry) => entry.id === id);
   if (!session) return <Navigate to="/login" replace />;
   if (!post) {
     return (
@@ -31,7 +35,6 @@ export default function ReadBlog() {
     if (!window.confirm(`Delete "${post.title}"? This cannot be undone.`)) return;
     const result = deletePost(post.id, session);
     if (result.ok) {
-      setPosts((current) => current.filter((entry) => entry.id !== post.id));
       navigate('/blogs', { replace: true });
     }
   }

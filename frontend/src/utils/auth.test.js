@@ -74,6 +74,25 @@ describe('local demo authentication', () => {
     expect(getUsers()).toEqual(original);
   });
 
+  it('keeps a saved account when only the registration session write fails', () => {
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('saved-account-id');
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === 'writespace_session') throw new Error('quota');
+      return originalSetItem.call(this, key, value);
+    });
+
+    const result = registerUser({ displayName: 'Writer', username: 'writer', password: 'demo', confirmPassword: 'demo' });
+
+    expect(result).toEqual({
+      ok: false,
+      errors: { form: 'Account saved, but the session could not be saved. Please log in.' },
+    });
+    expect(getUsers()).toHaveLength(1);
+    expect(getUsers()[0]).toMatchObject({ id: 'saved-account-id', username: 'writer', displayName: 'Writer' });
+    expect(getSession()).toBeNull();
+  });
+
   it('reports local storage write errors during registration and login', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
     expect(registerUser({ displayName: 'Writer', username: 'writer', password: 'demo', confirmPassword: 'demo' })).toMatchObject({

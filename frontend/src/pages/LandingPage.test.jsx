@@ -71,6 +71,26 @@ describe('LandingPage', () => {
     expect(screen.getByRole('heading', { name: 'Login destination' })).toBeInTheDocument();
   });
 
+  it('gracefully renders malformed post previews and preserves links for valid posts', async () => {
+    window.localStorage.setItem('writespace_session', JSON.stringify({ userId: 'u-1', role: 'user', username: 'writer', displayName: 'Writer' }));
+    savePosts([
+      { id: 'non-string-content', title: 'Missing words', content: { unexpected: true }, createdAt: '2025-01-03T00:00:00.000Z' },
+      { id: 'missing-content', title: 'No content field', createdAt: '2025-01-02T00:00:00.000Z' },
+      { id: 'valid', title: 'Valid note', content: 'Readable preview', createdAt: '2025-01-01T00:00:00.000Z' },
+    ]);
+
+    renderLanding();
+
+    expect(screen.getByRole('heading', { name: 'Missing words' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No content field' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Valid note' })).toBeInTheDocument();
+    expect(screen.getByText('Readable preview')).toBeInTheDocument();
+    expect(screen.queryByText('No posts yet - check back soon!')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /valid note/i }));
+    expect(screen.getByRole('heading', { name: 'Post destination' })).toBeInTheDocument();
+  });
+
   it('routes signed-in calls to action to the blogs and role dashboard', () => {
     window.localStorage.setItem('writespace_session', JSON.stringify({ userId: 'u-1', role: 'user', username: 'writer', displayName: 'Writer' }));
     renderLanding();

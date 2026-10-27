@@ -19,6 +19,13 @@ test('writer registers, publishes, reads, edits and deletes an owned post', asyn
   await page.getByRole('button', { name: 'Publish Post' }).click();
   await expect(page.getByRole('heading', { name: 'A post worth keeping' })).toBeVisible();
   await expect(page.getByText('First paragraph.\nSecond paragraph.')).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('writespace_posts')))).toEqual([
+    expect.objectContaining({
+      title: 'A post worth keeping',
+      content: 'First paragraph.\nSecond paragraph.',
+      authorName: 'Riley Harper',
+    }),
+  ]);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'A post worth keeping' })).toBeVisible();
   await page.getByRole('link', { name: 'Back to All Posts' }).click();
@@ -31,5 +38,6 @@ test('writer registers, publishes, reads, edits and deletes an owned post', asyn
   await page.getByRole('button', { name: 'Delete' }).click();
   await expect(page).toHaveURL(/\/blogs$/);
   await expect(page.getByRole('heading', { name: 'No blogs yet. Be the first to write one!' })).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('writespace_posts')))).toEqual([]);
   expect(browserErrors).toEqual([]);
 });

@@ -13,13 +13,16 @@ test('registration, writer login and invalid credentials use local storage sessi
   await page.getByLabel('Confirm Password').fill('demo-pass');
   await page.getByRole('button', { name: 'Create Account' }).click();
   await expect(page).toHaveURL(/\/blogs$/);
-  await expect(page.getByText('Blogs')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'All Blogs' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'No blogs yet. Be the first to write one!' })).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(/\/blogs$/);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('writespace_session')).username)).toBe('riley');
 
-  await page.evaluate(() => localStorage.clear());
-  await page.goto('/login');
+  await page.getByRole('button', { name: 'Logout' }).click();
+  await expect(page).toHaveURL('/');
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Login' }).click();
+  await expect(page).toHaveURL(/\/login$/);
   await page.getByLabel('Username').fill('unknown');
   await page.getByLabel('Password').fill('wrong');
   await page.getByRole('button', { name: 'Login' }).click();

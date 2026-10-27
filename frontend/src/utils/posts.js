@@ -1,5 +1,18 @@
 import { getPosts, savePosts } from './storage.js';
 
+const POSTS_UPDATED_EVENT = 'writespace:posts-updated';
+
+/** Notify mounted views after a successful post mutation. */
+function notifyPostsUpdated() {
+  window.dispatchEvent(new Event(POSTS_UPDATED_EVENT));
+}
+
+/** Subscribe a mounted view to successful same-tab post mutations. */
+export function subscribeToPostsUpdated(listener) {
+  window.addEventListener(POSTS_UPDATED_EVENT, listener);
+  return () => window.removeEventListener(POSTS_UPDATED_EVENT, listener);
+}
+
 /** Return posts newest-first while placing invalid timestamps after valid dates. */
 export function sortPostsNewest(posts) {
   return [...posts].sort((first, second) => {
@@ -52,6 +65,7 @@ export function updatePost(postId, changes, session) {
   const updated = { ...existing, title, content };
   const nextPosts = posts.map((post) => post.id === postId ? updated : post);
   if (!savePosts(nextPosts)) return { ok: false, error: 'Unable to save your changes. Check browser storage and try again.' };
+  notifyPostsUpdated();
   return { ok: true, post: updated };
 }
 
@@ -62,5 +76,6 @@ export function deletePost(postId, session) {
   if (!existing) return { ok: false, error: 'Post not found.' };
   if (!canManagePost(existing, session)) return { ok: false, error: 'You cannot delete this post.' };
   if (!savePosts(posts.filter((post) => post.id !== postId))) return { ok: false, error: 'Unable to delete this post. Check browser storage and try again.' };
+  notifyPostsUpdated();
   return { ok: true };
 }

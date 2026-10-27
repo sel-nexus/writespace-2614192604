@@ -7,6 +7,7 @@ import ReadBlog from './ReadBlog.jsx';
 import WriteBlog from './WriteBlog.jsx';
 import ProtectedRoute from '../components/ProtectedRoute.jsx';
 import { getPosts, savePosts, setSession } from '../utils/storage.js';
+import { updatePost } from '../utils/posts.js';
 
 const writer = { userId: 'writer-1', username: 'riley', displayName: 'Riley Harper', role: 'user' };
 const otherWriter = { userId: 'writer-2', username: 'avery', displayName: 'Avery Lane', role: 'user' };
@@ -69,6 +70,30 @@ describe('writer blog pages', () => {
     expect(screen.getByRole('link', { name: 'Back to All Posts' })).toBeInTheDocument();
   });
 
+  it('renders hostile title and content as inert text without creating markup elements', () => {
+    const title = '<img src=x onerror="alert(1)">';
+    const content = '<script>alert("xss")</script><svg onload="alert(1)">';
+    setSession(writer);
+    savePosts([{ ...ownPost, title, content }]);
+
+    const { container } = renderBlog('/blog/own-1');
+
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(title);
+    expect(screen.getByText(content)).toBeInTheDocument();
+    expect(container.querySelector('img, script, svg')).toBeNull();
+  });
+
+
+  it('refreshes a mounted reader after a post is updated in another feature view', async () => {
+    setSession(admin);
+    savePosts([otherPost]);
+    renderBlog('/blog/other-1');
+    expect(screen.getByRole('heading', { name: 'Avery note' })).toBeInTheDocument();
+    expect(updatePost('other-1', { title: 'Updated outside this view', content: 'Updated in another route.' }, admin).ok).toBe(true);
+    expect(await screen.findByRole('heading', { name: 'Updated outside this view' })).toBeInTheDocument();
+    expect(screen.getByText('Updated in another route.')).toBeInTheDocument();
+  });
+
   it('shows a not-found state for an unknown post id', () => {
     setSession(writer);
     renderBlog('/blog/missing');
@@ -87,6 +112,95 @@ describe('writer blog pages', () => {
     await user.click(screen.getByRole('button', { name: 'Publish Post' }));
     expect(await screen.findByRole('heading', { name: 'A fresh thought' })).toBeInTheDocument();
     expect(getPosts()[0]).toMatchObject({ id: 'created-post', authorId: writer.userId, authorName: writer.displayName, title: 'A fresh thought', content: 'Words worth keeping' });
+  });
+
+  it('redirects a directly rendered WriteBlog to login without a session', async () => {
+    render(
+      <MemoryRouter initialEntries={['/write']}>
+        <Routes>
+          <Route path="/write" element={<WriteBlog />} />
+          <Route path="/login" element={<h1>Login destination</h1>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Login destination' })).toBeInTheDocument();
+  });
+
+  it('redirects an edit request for a missing post to the blog list', async () => {
+    setSession(writer);
+    render(
+      <MemoryRouter initialEntries={['/edit/missing']}>
+        <Routes>
+          <Route path="/edit/:id" element={<WriteBlog />} />
+          <Route path="/blogs" element={<Home />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByRole('heading', { name: 'No blogs yet. Be the first to write one!' })).toBeInTheDocument();
+  });
+
+  it('shows only the title validation error when title is blank', async () => {
+    const user = userEvent.setup();
+    setSession(writer);
+    renderBlog('/write');
+    await user.type(screen.getByLabelText('Content'), 'Valid content');
+    await user.click(screen.getByRole('button', { name: 'Publish Post' }));
+    expect(screen.getByText('Title is required.')).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText('Content is required.')).not.toBeInTheDocument();
+    expect(getPosts()).toEqual([]);
+  });
+
+  it('shows only the content validation error when content is blank', async () => {
+    const user = userEvent.setup();
+    setSession(writer);
+    renderBlog('/write');
+    await user.type(screen.getByLabelText('Title'), 'Valid title');
+    await user.click(screen.getByRole('button', { name: 'Publish Post' }));
+    expect(screen.getByText('Content is required.')).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText('Title is required.')).not.toBeInTheDocument();
+    expect(getPosts()).toEqual([]);
+  });
+
+  it('keeps stored posts unchanged and shows an error when create persistence fails', async () => {
+    const user = userEvent.setup();
+    setSession(writer);
+    savePosts([otherPost]);
+    const originalStoredPosts = window.localStorage.getItem('writespace_posts');
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === 'writespace_posts') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    renderBlog('/write');
+    await user.type(screen.getByLabelText('Title'), 'A fresh thought');
+    await user.type(screen.getByLabelText('Content'), 'Words worth keeping');
+    await user.click(screen.getByRole('button', { name: 'Publish Post' }));
+    expect(await screen.findByText('Unable to save your post. Check browser storage and try again.')).toHaveAttribute('role', 'alert');
+    expect(screen.getByRole('button', { name: 'Publish Post' })).toBeInTheDocument();
+    expect(setItem).toHaveBeenCalledWith('writespace_posts', expect.any(String));
+    expect(window.localStorage.getItem('writespace_posts')).toBe(originalStoredPosts);
+    expect(getPosts()).toEqual([otherPost]);
+  });
+
+  it('keeps stored posts unchanged and shows an error when update persistence fails', async () => {
+    const user = userEvent.setup();
+    setSession(writer);
+    savePosts([ownPost, otherPost]);
+    const originalStoredPosts = window.localStorage.getItem('writespace_posts');
+    const originalSetItem = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === 'writespace_posts') throw new DOMException('Quota exceeded', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    });
+    renderBlog('/edit/own-1');
+    await user.clear(screen.getByLabelText('Title'));
+    await user.type(screen.getByLabelText('Title'), 'Updated Riley note');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+    expect(await screen.findByText('Unable to save your changes. Check browser storage and try again.')).toHaveAttribute('role', 'alert');
+    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeInTheDocument();
+    expect(setItem).toHaveBeenCalledWith('writespace_posts', expect.any(String));
+    expect(window.localStorage.getItem('writespace_posts')).toBe(originalStoredPosts);
+    expect(getPosts()).toEqual([ownPost, otherPost]);
   });
 
   it('validates required title and content and keeps the form in place', async () => {
@@ -140,5 +254,16 @@ describe('writer blog pages', () => {
     await user.type(screen.getByLabelText('Title'), 'Admin revised');
     await user.click(screen.getByRole('button', { name: 'Save Changes' }));
     expect(await screen.findByRole('heading', { name: 'Admin revised' })).toBeInTheDocument();
+  });
+
+  it('navigates to blogs after a confirmed delete and persists removal', async () => {
+    const user = userEvent.setup();
+    setSession(writer);
+    savePosts([ownPost]);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderBlog('/blog/own-1');
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await screen.findByRole('heading', { name: 'All Blogs' })).toBeInTheDocument();
+    expect(getPosts()).toEqual([]);
   });
 });

@@ -45,6 +45,43 @@ describe('post utilities', () => {
     expect(getPosts()).toEqual([result.post]);
   });
 
+  it('preserves XSS-like title and content as inert plain-text values', () => {
+    const title = '<img src=x onerror="alert(1)">';
+    const content = '<script>alert("xss")</script><svg onload="alert(1)">';
+    const result = createPost({ title, content, session: owner }, 'post-inert-xss');
+
+    expect(result).toEqual({
+      ok: true,
+      post: { id: 'post-inert-xss', title, content, createdAt: expect.any(String), authorId: owner.userId, authorName: owner.displayName },
+    });
+    expect(getPosts()).toEqual([result.post]);
+  });
+
+  it('persists very large post titles and content without truncating them', () => {
+    const title = `Large title ${'t'.repeat(10_000)}`;
+    const content = `Large content ${'c'.repeat(100_000)}`;
+    const result = createPost({ title, content, session: owner }, 'post-large-input');
+
+    expect(result.ok).toBe(true);
+    expect(result.post.title).toBe(title);
+    expect(result.post.content).toBe(content);
+    expect(getPosts()).toEqual([result.post]);
+  });
+
+  it('reports local persistence failure when creating a post', () => {
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === 'writespace_posts') throw new Error('quota');
+      return originalSetItem.call(this, key, value);
+    });
+
+    expect(createPost({ title: 'Title', content: 'Body', session: owner }, 'post-unsaved')).toEqual({
+      ok: false,
+      error: 'Unable to save your post. Check browser storage and try again.',
+    });
+    expect(getPosts()).toEqual([]);
+  });
+
   it('rejects missing post fields or author context', () => {
     expect(createPost({ title: '', content: 'body', session: owner })).toMatchObject({ ok: false, error: expect.stringContaining('required') });
     expect(createPost({ title: 'title', content: 'body', session: null })).toMatchObject({ ok: false });
@@ -56,6 +93,21 @@ describe('post utilities', () => {
     const result = updatePost('post-1', { title: ' Revised ', content: 'New body' }, owner);
     expect(result).toEqual({ ok: true, post: { ...samplePost, title: 'Revised', content: 'New body' } });
     expect(getPosts()).toEqual([result.post]);
+  });
+
+  it('reports storage failure and preserves the stored post when updating an owned post', () => {
+    savePosts([samplePost]);
+    const originalSetItem = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+      if (key === 'writespace_posts') throw new Error('quota');
+      return originalSetItem.call(this, key, value);
+    });
+
+    expect(updatePost('post-1', { title: 'Revised', content: 'New body' }, owner)).toEqual({
+      ok: false,
+      error: 'Unable to save your changes. Check browser storage and try again.',
+    });
+    expect(getPosts()).toEqual([samplePost]);
   });
 
   it('rejects missing, unauthorized, and blank post updates without changing data', () => {
